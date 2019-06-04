@@ -19,8 +19,17 @@ public class FurnitureSpriteController : MonoBehaviour
     void Start()
     {
         LoadSprites();
+        //Instantiate our dictionary that tracks which gameobject is rendering which tile data
         furnitureGameObjectMap = new Dictionary<Furniture, GameObject>();
+
+        //Register our callback so that our gameobject gets updated whenever the tile's type changes
         world.RegisterFurnitureCreated(OnFurnitureCreated);
+
+        //Go through any existing furniture and call the oncreated event manually (ie from a save that was loaded)
+        foreach(Furniture furniture in world.furnitures)
+        {
+            OnFurnitureCreated(furniture);
+        }
     }
 
     private void LoadSprites()
@@ -37,7 +46,7 @@ public class FurnitureSpriteController : MonoBehaviour
     public void OnFurnitureCreated(Furniture objFurniture)
     {
         //Create a visual gameobject linked to this data
-        Debug.Log("OnFurnitureCreated");
+        //Debug.Log("OnFurnitureCreated");
 
         //Todo FixMe does not consider multi tile objects or rotated objects
 
@@ -62,7 +71,7 @@ public class FurnitureSpriteController : MonoBehaviour
 
     void OnFurnitureChanged(Furniture furniture)
     {
-        Debug.Log("OnFurnitureChanged " + furniture);
+        //Debug.Log("OnFurnitureChanged " + furniture);
 
         //Make sure the furniture graphics are correct.
 
@@ -79,7 +88,7 @@ public class FurnitureSpriteController : MonoBehaviour
 
     public Sprite GetFurnitureSprite(Furniture furniture)
     {
-        Debug.Log("GetFurnitureSprite " + furniture);
+        //Debug.Log("GetFurnitureSprite " + furniture);
         if (furniture.linksToNeighbour == false)
         {
             return furnitureSprites[furniture.objectType];
@@ -127,7 +136,7 @@ public class FurnitureSpriteController : MonoBehaviour
 
     public Sprite GetFurnitureSprite(string objectType)
     {
-        Debug.Log("GetFurnitureSprite objectType " + objectType);
+        //Debug.Log("GetFurnitureSprite objectType " + objectType);
 
         if(furnitureSprites.ContainsKey(objectType))
         {

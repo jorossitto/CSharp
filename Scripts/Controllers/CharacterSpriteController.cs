@@ -17,12 +17,16 @@ public class CharacterSpriteController : MonoBehaviour
     void Start()
     {
         LoadSprites();
+        //Instantiate our dictionary that tracks which gameobject is rending which tile data
         characterGameObjectMap = new Dictionary<Character, GameObject>();
+        //Register our callback so our gameobject gets updated whenever the tile's type changes
         world.RegisterCharacterCreated(OnCharacterCreated);
 
-        //Debug
-        Character character = world.CreateCharacter(world.GetTileAt(world.Width / 2, world.Height / 2));
-        //character.SetDestination(world.GetTileAt(world.Width / 2 + 5, world.Height / 2));
+        //check for preexisting characters, which won't do the callback.
+        foreach(Character character in world.characters)
+        {
+            OnCharacterCreated(character);
+        }
     }
 
     private void LoadSprites()
@@ -39,7 +43,7 @@ public class CharacterSpriteController : MonoBehaviour
     public void OnCharacterCreated(Character character)
     {
         //Create a visual gameobject linked to this data
-        Debug.Log("OnCharacterCreated");
+        //Debug.Log("OnCharacterCreated");
 
         //Todo FixMe does not consider multi tile objects or rotated objects
 

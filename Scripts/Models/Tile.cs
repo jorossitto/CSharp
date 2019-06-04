@@ -1,13 +1,36 @@
 ﻿using UnityEngine;
-using System.Collections;
 using System;
+using System.Xml;
+using System.Xml.Schema;
+using System.Xml.Serialization;
 
 public enum TileType { Empty, Floor };
 
-public class Tile
+public class Tile:IXmlSerializable
 {
 
 	TileType type = TileType.Empty;
+    public TileType Type
+    {
+        get
+        {
+            return type;
+        }
+
+        //Call the callback and let things know we've changed.
+        set
+        {
+            TileType oldType = type;
+            type = value;
+            if (callbackTileChanged != null && oldType != type)
+            {
+                callbackTileChanged(this);
+            }
+
+        }
+    }
+
+    Inventory inventory;
 
     // the function we callback any time our tile's data changes
     Action<Tile> callbackTileChanged;
@@ -34,7 +57,7 @@ public class Tile
         }
     }
 
-    Inventory inventory;
+
 
     //furniture is something like a wall door or sofa
     public Furniture furniture
@@ -50,25 +73,7 @@ public class Tile
 
     public Job pendingFurnitureJob;
 
-    public TileType Type
-    {
-        get
-        {
-            return type;
-        }
 
-        //Call the callback and let things know we've changed.
-        set
-        {
-            TileType oldType = type;
-            type = value;
-            if(callbackTileChanged != null && oldType != type)
-            {
-                callbackTileChanged(this);
-            }
-            
-        } 
-    }
 
     //Initalizes a new instance of the class
     public Tile( World world, int x, int y )
@@ -113,6 +118,8 @@ public class Tile
     //Tells us if two tiles are adjacent
     public bool IsNeighbour(Tile tile, bool diagOkay = false)
     {
+        //check to see if we have a difference of exactly one between the two tile coordinates
+        //if true we are neighbours
         if(this.x == tile.x && (this.y == tile.y +1 || this.y == tile.y-1))
         {
             return true;
@@ -136,4 +143,65 @@ public class Tile
 
         return false;
     }
+
+
+    public Tile[] GetNeighbours(bool diagOkay = false)
+    {
+        Tile[] neighbours;
+        if(diagOkay == false)
+        {
+            neighbours = new Tile[4]; //Tile order : NESW
+        }
+        else
+        {
+            neighbours = new Tile[8]; //Tile order :NESW NE SE SW NW
+        }
+
+        Tile neighbour;
+        neighbour = world.GetTileAt(x, y + 1);
+        neighbours[0] = neighbour; //could be null but thats ok
+        neighbour = world.GetTileAt(x+1, y);
+        neighbours[1] = neighbour; //could be null but thats ok
+        neighbour = world.GetTileAt(x, y - 1);
+        neighbours[2] = neighbour; //could be null but thats ok
+        neighbour = world.GetTileAt(x-1, y);
+        neighbours[3] = neighbour; //could be null but thats ok
+
+        if(diagOkay == true)
+        {
+            neighbour = world.GetTileAt(x+1, y + 1);
+            neighbours[4] = neighbour; //could be null but thats ok
+            neighbour = world.GetTileAt(x + 1, y-1);
+            neighbours[5] = neighbour; //could be null but thats ok
+            neighbour = world.GetTileAt(x-1, y - 1);
+            neighbours[6] = neighbour; //could be null but thats ok
+            neighbour = world.GetTileAt(x - 1, y+1);
+            neighbours[7] = neighbour; //could be null but thats ok
+        }
+
+        return neighbours;
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///
+    ///                                                Saving and Loading
+    /// 
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public XmlSchema GetSchema()
+    {
+        return null;
+    }
+    public void WriteXml(XmlWriter writer)
+    {
+        writer.WriteAttributeString("X", X.ToString());
+        writer.WriteAttributeString("Y", Y.ToString());
+        writer.WriteAttributeString("Type", ((int)Type).ToString());
+    }
+    public void ReadXml(XmlReader reader)
+    {
+        //type = (TileType)int.Parse(reader.GetAttribute("Type"));
+        Type = (TileType)int.Parse(reader.GetAttribute("Type"));
+    }
+
+
 }

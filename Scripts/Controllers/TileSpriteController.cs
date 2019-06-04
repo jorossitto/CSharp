@@ -42,9 +42,7 @@ public class TileSpriteController : MonoBehaviour
                 SpriteRenderer tileSpriteRenderer = tileGameObject.AddComponent<SpriteRenderer>();
                 tileSpriteRenderer.sprite = emptySprite;
                 tileSpriteRenderer.sortingLayerName = TILESORTINGLAYER;
-                //tileData.RegisterTileTypeChangedCallback((tile) => { OnTileTypeChanged(tile, tileGameObject); });
-
-                //SetFloorSprite(tileData, tileSpriteRenderer);
+                OnTileChanged(tileData);
             }
         }
 
