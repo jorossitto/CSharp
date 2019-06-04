@@ -23,11 +23,17 @@ public class JobSpriteController : MonoBehaviour
 
     void OnJobCreated(Job job)
     {
-        Debug.Log("OnJobCreated");
+        //Debug.Log("OnJobCreated");
         //todo fixme we can only do furniture building jobs
         //Todo sprite
         //Creates a new gameobject and adds it to our scene
         GameObject jobGameObject = new GameObject();
+
+        if(jobGameObjectMap.ContainsKey(job))
+        {
+            Debug.LogError("OnJobCreated: Job created for a job that already exists most likely job is requeued");
+            return;
+        }
         //Add tile//Gameobject to dictionary
         jobGameObjectMap.Add(job, jobGameObject);
         jobGameObject.name = "JOB_" + job.jobObjectType + "(" + job.tile.X + "," + job.tile.Y + ")";
