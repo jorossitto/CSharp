@@ -6,20 +6,32 @@ using System.Xml.Serialization;
 using System.Collections.Generic;
 
 //Installed objects are things like walls doors furniture
-public class Furniture:IXmlSerializable
+public class Furniture : IXmlSerializable
 {
     const string OBJECT_TYPE = "objectType";
     const string MOVEMENT_COST = "movementCost";
+    const string NAME = "name";
+    const string PARAM = "Param";
+    const string VALUE = "value";
 
-    public Dictionary<string, object> furnitureParamaters;
-    public Action<Furniture, float> updateActions;
+    //custom parameter for this particular piece of furniture
+    //We are using a diction because later custom lua function will be able to use whatever parameters the user/modder would like
+    //The lua code will bind to this dictionary
+    protected Dictionary<string, float> furnitureParamaters;
+    //Actions are called every update they get passed the furniture they belonged to plus a delta time
+    protected Action<Furniture, float> updateActions;
+
+
+    public Func<Furniture, Enterability> isEnterable;
+
+    List<Job> jobs;
 
     public void Update(float deltaTime)
     {
-        if(updateActions != null)
+        if (updateActions != null)
         {
             updateActions(this, deltaTime);
-        }       
+        }
     }
 
     //This represents the base tile of the object
@@ -43,9 +55,21 @@ public class Furniture:IXmlSerializable
         get; protected set;
     }
 
+    public bool roomEnclosure
+    {
+        get; protected set;
+    }
     //Graphics cost may not be the full covered area
-    int width;
-    int height;
+    public int width
+    {
+        get; protected set;
+    }
+    public int height
+    {
+        get; protected set;
+    }
+
+    public Color tint = Color.white;
 
     public bool linksToNeighbour
     {
@@ -53,7 +77,8 @@ public class Furniture:IXmlSerializable
     }
 
 
-    Action<Furniture> callBackOnChanged;
+    public Action<Furniture> callBackOnChanged;
+    public Action<Furniture> callBackOnRemoved;
 
     Func<Tile, bool> funcPositionValidation;
 
@@ -65,27 +90,42 @@ public class Furniture:IXmlSerializable
     /// </summary>
     public Furniture()
     {
-        furnitureParamaters = new Dictionary<string, object>();
+        furnitureParamaters = new Dictionary<string, float>();
+        jobs = new List<Job>();
     }
     /// <summary>
-    /// Copy Construtor
+    /// Copy Construtor -- don't call this directly unless we never do any subclassing instead use clone() which is more virtual
     /// </summary>
     /// <param name="other"> the OTHER furniture you would like to copy</param>
     protected Furniture(Furniture other)
     {
         this.objectType = other.objectType;
         this.movementCost = other.movementCost;
+        this.roomEnclosure = other.roomEnclosure;
         this.width = other.width;
         this.height = other.height;
+        this.tint = other.tint;
         this.linksToNeighbour = other.linksToNeighbour;
-        this.furnitureParamaters = new Dictionary<string, object>(other.furnitureParamaters);
-        if(other.updateActions != null)
+        this.furnitureParamaters = new Dictionary<string, float>(other.furnitureParamaters);
+        jobs = new List<Job>();
+
+        if (other.updateActions != null)
         {
             this.updateActions = (Action<Furniture, float>)other.updateActions.Clone();
         }
+
+        if (other.funcPositionValidation != null)
+        {
+            this.funcPositionValidation = (Func<Tile, bool>)other.funcPositionValidation.Clone();
+        }
+
+        this.isEnterable = other.isEnterable;
         
     }
-
+    /// <summary>
+    /// Make a copy of the current furniture. Sub-classes should override this clone() if a different (sub-classed) copy constructor should be run
+    /// </summary>
+    /// <returns></returns>
     virtual public Furniture Clone()
     {
         return new Furniture(this);
@@ -99,15 +139,16 @@ public class Furniture:IXmlSerializable
     /// <param name="width">Width in tiles the object occupies</param>
     /// <param name="height">Height in tiles the object occupies</param>
     /// <param name="linksToNeighbour">Does the sprite change if placed adjacent to other tiles</param>
-    public Furniture (string objectType, float movementCost=1f, int width=1, int height=1, bool linksToNeighbour = false)
+    public Furniture (string objectType, float movementCost=1f, int width=1, int height=1, bool linksToNeighbour = false, bool roomEnclosure = false)
     {
         this.objectType = objectType;
         this.movementCost = movementCost;
+        this.roomEnclosure = roomEnclosure;
         this.width = width;
         this.height = height;
         this.linksToNeighbour = linksToNeighbour;
-        this.funcPositionValidation = this.__IsValidPosition;
-        this.furnitureParamaters = new Dictionary<string, object>();
+        this.funcPositionValidation = this.DefaultIsValidPosition;
+        this.furnitureParamaters = new Dictionary<string, float>();
     }
 
     static public Furniture PlaceInstance(Furniture proto, Tile tile)
@@ -175,6 +216,17 @@ public class Furniture:IXmlSerializable
         callBackOnChanged += callbackFunction;
     }
 
+    public void RegisterOnRemovedCallback(Action<Furniture> callbackFunction)
+    {
+        callBackOnRemoved += callbackFunction;
+    }
+
+    public void UnregisterOnRemovedCallback(Action<Furniture> callbackFunction)
+    {
+        callBackOnRemoved += callbackFunction;
+    }
+
+
     public bool IsValidPosition(Tile tile)
     {
         return funcPositionValidation(tile);
@@ -182,30 +234,28 @@ public class Furniture:IXmlSerializable
 
     //todo fixme these functions should never be called directly
     //therefore they shouldn't be public
-    public bool __IsValidPosition(Tile tile)
+    //this will be replaced by validation checks fed to us from lua
+    //will be custimizable for each piece of furniture
+    //door might be specific that it needs two walls to connect to.
+    protected bool DefaultIsValidPosition(Tile tile)
     {
-        //Make sure tile is floor
-        if(tile.Type != TileType.Floor)
+        for (int x_off = tile.X; x_off < (tile.X + width); x_off++)
         {
-            return false;
+            for (int y_off = tile.Y; y_off < (tile.Y + height); y_off++)
+            {
+                Tile tileInRange = tile.world.GetTileAt(x_off, y_off);
+                //Make sure tile is floor
+                if (tileInRange.Type != TileType.Floor)
+                {
+                    return false;
+                }
+                //Make sure tile doesn't already have furniture
+                if (tileInRange.furniture != null)
+                {
+                    return false;
+                }
+            }
         }
-        //Make sure tile doesn't already have furniture
-        if(tile.furniture != null)
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    public bool __IsValidPositionDoor(Tile tile)
-    {
-        if(__IsValidPosition(tile) == false)
-        {
-            return false;
-        }
-
-        //Make sure we have a pair of E/W walls or N/S walls
         return true;
     }
 
@@ -223,13 +273,13 @@ public class Furniture:IXmlSerializable
         writer.WriteAttributeString("X", tile.X.ToString());
         writer.WriteAttributeString("Y", tile.Y.ToString());
         writer.WriteAttributeString(OBJECT_TYPE, objectType);
-        writer.WriteAttributeString(MOVEMENT_COST, movementCost.ToString());
+        //writer.WriteAttributeString(MOVEMENT_COST, movementCost.ToString());
 
         foreach (string key in furnitureParamaters.Keys)
         {
-            writer.WriteStartElement("Param");
-            writer.WriteAttributeString("name", key);
-            writer.WriteAttributeString("value", furnitureParamaters[key].ToString());
+            writer.WriteStartElement(PARAM);
+            writer.WriteAttributeString(NAME, key);
+            writer.WriteAttributeString(VALUE, furnitureParamaters[key].ToString());
             writer.WriteEndElement();
 
         }
@@ -241,16 +291,106 @@ public class Furniture:IXmlSerializable
         //Debug.LogError("Furniture read xml not used");
         //x, y, and object type have already been set and we should already be assigned to a tile so just read extra data
         //objectType = reader.GetAttribute(OBJECT_TYPE);
-        movementCost = int.Parse(reader.GetAttribute(MOVEMENT_COST));
+        //movementCost = int.Parse(reader.GetAttribute(MOVEMENT_COST));
 
-        if(reader.ReadToDescendant("Param"))
+        if(reader.ReadToDescendant(PARAM))
         {
             do
             {
+                string key = reader.GetAttribute(NAME);
+                float value = float.Parse(reader.GetAttribute(VALUE));
+                furnitureParamaters[key] = value;
 
-            } while (true);
+            } while (reader.ReadToNextSibling(PARAM));
+        }
+    }
+    /// <summary>
+    /// Gets the custom furniture paramater from a string
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="defaultValue"></param>
+    /// <returns>the paramater value from a float </returns>
+    public float GetParameter(string key, float defaultValue = 0)
+    {
+        if (furnitureParamaters.ContainsKey(key) == false)
+        {
+            return defaultValue;
+        }
+        return furnitureParamaters[key];
+    }
+
+    public void SetParameter(string key, float value)
+    {
+        furnitureParamaters[key] = value;
+    }
+
+    public void ChangeParameter(string key, float value)
+    {
+        if (furnitureParamaters.ContainsKey(key) == false)
+        {
+            furnitureParamaters[key] = value;
+        }
+
+        furnitureParamaters[key] += value;
+    }
+
+    /// <summary>
+    /// Register a function that will be called every update
+    /// Later this implementation might change a bit as we support lua
+    /// </summary>
+    /// <param name="a">a stands for action</param>
+    public void RegisterUpdateAction(Action<Furniture, float> action)
+    {
+        updateActions += action;
+    }
+
+    public void UnregisterUpdateAction(Action<Furniture, float> action)
+    {
+        updateActions -= action;
+    }
+
+    public int JobCount()
+    {
+        return jobs.Count;
+    }
+
+    public void AddJob(Job job)
+    {
+        jobs.Add(job);
+        tile.world.jobQueue.Enqueue(job);
+    }
+
+    public void RemoveJob(Job job)
+    {
+        jobs.Remove(job);
+        job.CancelJob();
+        tile.world.jobQueue.Remove(job);
+
+    }
+
+    public void ClearJobs()
+    {
+        foreach(Job job in jobs)
+        {
+            RemoveJob(job);
         }
     }
 
+    public bool IsStockpile()
+    {
+        return objectType == Config.STOCKPILE;
+    }
 
+    public void Deconstruct()
+    {
+        Debug.Log("Deconstruct");
+        tile.UnplaceFurniture();
+
+        if(callBackOnRemoved != null)
+        {
+            callBackOnRemoved(this);
+        }
+        //At this point no data structures should be pointing to us so we should get garbage-collected
+
+    }
 }

@@ -5,9 +5,11 @@ using System.Xml.Schema;
 using System.Xml.Serialization;
 
 public enum TileType { Empty, Floor };
+public enum Enterability { Yes, Never, Soon};
 
 public class Tile:IXmlSerializable
 {
+    const string TYPE = "Type";
 
 	TileType type = TileType.Empty;
     public TileType Type
@@ -30,34 +32,13 @@ public class Tile:IXmlSerializable
         }
     }
 
-    Inventory inventory;
+    //Is something like a drill or a stack of metal sitting on the floor
+    public Inventory inventoryTile;
+
+    public Room room;
 
     // the function we callback any time our tile's data changes
     Action<Tile> callbackTileChanged;
-
-    int x;
-    int y;
-    public int X { get => x; }
-    public int Y { get => y; }
-
-    public float movementCost
-    {
-        get
-        {
-            if(type == TileType.Empty)
-            {
-                return 0; //tile is unwalkable
-            }
-            if(furniture == null)
-            {
-                return 1;
-            }
-
-            return 1 * furniture.movementCost;
-        }
-    }
-
-
 
     //furniture is something like a wall door or sofa
     public Furniture furniture
@@ -65,15 +46,36 @@ public class Tile:IXmlSerializable
         get; protected set;
     }
 
+    public Job pendingFurnitureJob;
+
     //The contex in which we exist
     public World world
     {
         get; protected set;
     }
 
-    public Job pendingFurnitureJob;
+    int x;
+    int y;
+    public int X { get => x; }
+    public int Y { get => y; }
 
+    float baseTileMovementCost = 1f; // Fixme this is hardcoded for now
+    public float movementCost
+    {
+        get
+        {
+            if (type == TileType.Empty)
+            {
+                return 0; //tile is unwalkable
+            }
+            if (furniture == null)
+            {
+                return 1;
+            }
 
+            return baseTileMovementCost * furniture.movementCost;
+        }
+    }
 
     //Initalizes a new instance of the class
     public Tile( World world, int x, int y )
@@ -94,24 +96,80 @@ public class Tile:IXmlSerializable
         callbackTileChanged -= callback;
     }
 
-    public bool PlaceFurniture(Furniture objInstance)
+    public bool UnplaceFurniture()
     {
-        if(objInstance == null)
+        //Just uninstalling Fixme: What if we have a multi-tile furniture
+        if(furniture == null)
         {
-            //Uninstall whatever was here before
-            furniture = null;
-            return true;
+            return false;
         }
 
-        // objInstance isn't null
-        if(furniture != null)
+        Furniture currentFurnitureObject = furniture;
+
+        for (int x_off = x; x_off < (x + currentFurnitureObject.width); x_off++)
+        {
+            for (int y_off = y; y_off < (y + currentFurnitureObject.height); y_off++)
+            {
+                Tile tile = world.GetTileAt(x_off, y_off);
+                tile.furniture = null;
+            }
+        }
+        return true;
+    }
+    public bool PlaceFurniture(Furniture objInstance)
+    {
+        if( objInstance == null)
+        {
+            return UnplaceFurniture();
+        }
+
+        if (objInstance != null && objInstance.IsValidPosition(this) == false)
         {
             Debug.LogError("Trying to assign furniture to a tile that already has one!");
             return false;
         }
 
-        //At this point everythin's fine
-        furniture = objInstance;
+        for (int x_off = x; x_off < (x + objInstance.width); x_off++)
+        {
+            for (int y_off = y; y_off < (y + objInstance.height); y_off++)
+            {
+                Tile tile = world.GetTileAt(x_off, y_off);
+                tile.furniture = objInstance;
+            }
+        }
+        return true;
+    }
+
+    public bool PlaceInventory(Inventory inventoryInstance)
+    {
+        if (inventoryInstance == null)
+        {
+            //Uninstall whatever was here before
+            inventoryTile = null;
+            return true;
+        }
+
+        // inventoryInstance isn't null
+        if (inventoryTile != null)
+        {
+            //There is already inventory here maybe we can combine a stack?
+            if(inventoryTile.objectType != inventoryInstance.objectType)
+            {
+                Debug.LogError("Trying to assign inventory to a tile who already has some of a different type");
+                return false;
+            }
+            int numToMove = inventoryInstance.stackSize;
+            if(inventoryTile.stackSize + numToMove > inventoryTile.maxStackSize)
+            {
+                numToMove = inventoryTile.maxStackSize - inventoryTile.stackSize;
+            }
+            inventoryTile.stackSize += numToMove;
+            inventoryInstance.stackSize -= numToMove;
+            return true;
+        }
+        inventoryTile = inventoryInstance.Clone();
+        inventoryTile.tile = this;
+        inventoryInstance.stackSize = 0;
         return true;
     }
 
@@ -195,12 +253,46 @@ public class Tile:IXmlSerializable
     {
         writer.WriteAttributeString("X", X.ToString());
         writer.WriteAttributeString("Y", Y.ToString());
-        writer.WriteAttributeString("Type", ((int)Type).ToString());
+        writer.WriteAttributeString(TYPE, ((int)Type).ToString());
     }
     public void ReadXml(XmlReader reader)
     {
         //type = (TileType)int.Parse(reader.GetAttribute("Type"));
-        Type = (TileType)int.Parse(reader.GetAttribute("Type"));
+        Type = (TileType)int.Parse(reader.GetAttribute(TYPE));
+    }
+
+    public Enterability IsEnterable()
+    {
+        //This returns true if you can enter this tile right this moment.
+        if(movementCost == 0)
+        {
+            return Enterability.Never;
+        }
+
+        //Check out furniture to see if it has a special block on enterability
+        if(furniture != null && furniture.isEnterable != null)
+        {
+            return furniture.isEnterable(furniture);
+        }
+
+        return Enterability.Yes;
+    }
+
+    public Tile North()
+    {
+        return world.GetTileAt(x, y + 1);
+    }
+    public Tile South()
+    {
+        return world.GetTileAt(x, y - 1);
+    }
+    public Tile East()
+    {
+        return world.GetTileAt(x+1, y);
+    }
+    public Tile West()
+    {
+        return world.GetTileAt(x-1, y);
     }
 
 

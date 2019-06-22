@@ -48,13 +48,17 @@ public class WorldController : MonoBehaviour
         world.Update(Time.deltaTime);
     }
 
-
+    /// <summary>
+    /// Gets the tile at the unity-space coordinates
+    /// </summary>
+    /// <param name="coord">Unity world space coordinates</param>
+    /// <returns>The tile at world coordinates</returns>
     public Tile GetTileAtWorldCoord(Vector3 coord)
     {
-        int x = Mathf.FloorToInt(coord.x);
-        int y = Mathf.FloorToInt(coord.y);
+        int x = Mathf.FloorToInt(coord.x + .5f);
+        int y = Mathf.FloorToInt(coord.y + .5f);
 
-        return WorldController.Instance.World.GetTileAt(x, y);
+        return World.GetTileAt(x, y);
     }
 
     public void NewWorldButton()
@@ -77,7 +81,7 @@ public class WorldController : MonoBehaviour
 
     public void LoadWorld()
     {
-        Debug.Log("Load world button was clicked!");
+        //Debug.Log("Load world button was clicked!");
         //Reload the scene to reset all data(and purge old refrences)
         loadWorld = true;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
@@ -95,7 +99,7 @@ public class WorldController : MonoBehaviour
 
     private void CreateWorldFromSaveFile()
     {
-        Debug.Log("CreateWorldFromSaveFile");
+        //Debug.Log("CreateWorldFromSaveFile");
         //Create a world from our save file data
         //PlayerPrefs.SetString("SameGame00", writer.ToString());
         XmlSerializer serializer = new XmlSerializer(typeof(World));

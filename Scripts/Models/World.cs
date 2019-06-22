@@ -7,28 +7,22 @@ using System.Xml.Serialization;
 
 public class World : IXmlSerializable
 {
-    //Const Variables
-    const string WIDTH = "Width";
-    const string HEIGHT = "Height";
-    const string TILES = "Tiles";
-    const string TILE = "Tile";
-    const string WALL = "Wall";
-    const string FURNITURES = "Furnitures";
-    const string FURNITURE = "Furniture";
-    const string OBJECT_TYPE = "objectType";
-    const string CHARACTERS = "Characters";
-    const string CHARACTER = "Character";
-    const string DOOR = "Door";
+    const string STOCKPILE = Config.STOCKPILE;
+    const string OXYGEN_GENERATOR = "Oxygen Generator";
+    
 
     //two dimensional array to hold our tile data
     Tile[,] tiles;
     public List<Character> characters;
     public List<Furniture> furnitures;
+    public List<Room> rooms;
+    public InventoryManager inventoryManager;
 
     //Pathfinding graph used to navigate our world
     public PathTileGraph tileGraph;
 
-    Dictionary<string, Furniture> furniturePrototypes;
+    public Dictionary<string, Furniture> furniturePrototypes;
+    public Dictionary<string, Job> furnitureJobPrototypes;
 
     //Tile Width of the world
     int width;
@@ -41,6 +35,7 @@ public class World : IXmlSerializable
     //CB stands for callback
     Action<Furniture> callBackFurnitureCreated;
     Action<Character> callBackCharacterCreated;
+    Action<Inventory> callBackInventoryCreated;
     Action<Tile> callBackTileChanged;
 
     //Todo most likely this will be replaced with a dedicated class for managing job queues
@@ -56,6 +51,33 @@ public class World : IXmlSerializable
         //Make one character
         Character character = CreateCharacter(GetTileAt(Width / 2, Height / 2));
     }
+    /// <summary>
+    /// Default Constructor, used when loading a world from a file.
+    /// </summary>
+    public World()
+    {
+
+    }
+    public Room GetOutsideRoom()
+    {
+        return rooms[0];
+    }
+
+    public void AddRoom(Room room)
+    {
+        rooms.Add(room);
+    }
+    public void DeleteRoom(Room room)
+    {
+        if(room == GetOutsideRoom())
+        {
+            Debug.LogError("Tried to delete the outside");
+            return;
+        }
+        rooms.Remove(room);//remove room from rooms list
+        room.UnassignAllTiles();//all tiles that belong to this room should be re-assigned to the outside
+
+    }
 
     private void SetUpWorld(int width, int height)
     {
@@ -66,12 +88,16 @@ public class World : IXmlSerializable
 
         tiles = new Tile[width, height];
 
+        rooms = new List<Room>();
+        rooms.Add(new Room(this)); //Create the outside
+
         for (int x = 0; x < width; x++)
         {
             for (int y = 0; y < height; y++)
             {
                 tiles[x, y] = new Tile(this, x, y);
                 tiles[x, y].RegisterTileTypeChangedCallback(OnTileChanged);
+                tiles[x, y].room = rooms[0]; //room[0] is outside
             }
         }
 
@@ -79,6 +105,8 @@ public class World : IXmlSerializable
         CreateFurniturePrototypes();
         characters = new List<Character>();
         furnitures = new List<Furniture>();
+        inventoryManager = new InventoryManager();
+
     }
 
     public void Update(float deltaTime)
@@ -110,26 +138,59 @@ public class World : IXmlSerializable
     void CreateFurniturePrototypes()
     {
         furniturePrototypes = new Dictionary<string, Furniture>();
-        furniturePrototypes.Add(WALL, //Name of object
-            new Furniture(WALL,
+        furnitureJobPrototypes = new Dictionary<string, Job>();
+
+        furniturePrototypes.Add(Config.WALL, //Name of object
+            new Furniture(Config.WALL,
             0, //Can not be passed through
             1, //Width
             1, //Height
-            true //Links to neighbours and becomes part of a larger object
+            true, //Links to neighbours and becomes part of a larger object
+            true //The walls enclose rooms
             ));
 
-        furniturePrototypes.Add(DOOR, //Name of object
-            new Furniture(DOOR,
-            0, //Can not be passed through
+        furnitureJobPrototypes.Add(Config.WALL, new Job(null, Config.WALL, FurnitureActions.JobCompleteFurnitureBuilding, 1f, new Inventory[] { new Inventory(Config.STEEL_PLATE, 5, 0)}));
+        
+
+        furniturePrototypes.Add(Config.DOOR, //Name of object
+            new Furniture(Config.DOOR,
+            1, //Pathfinding cost
             1, //Width
             1, //Height
-            true //Links to neighbours and becomes part of a larger object
+            false, //Links to neighbours and becomes part of a larger object
+            true //Doors enclose rooms
             ));
 
         //What if the object behaviors were scriptable and therefore were part of the text file
-        furniturePrototypes[DOOR].furnitureParamaters["openess"] = 0;
-        furniturePrototypes[DOOR].updateActions += FurnitureActions.DoorUpdateAction;
+        furniturePrototypes[Config.DOOR].SetParameter(Config.OPENNESS,0);
+        furniturePrototypes[Config.DOOR].SetParameter(Config.IS_OPENING, 0);
+        furniturePrototypes[Config.DOOR].RegisterUpdateAction( FurnitureActions.DoorUpdateAction);
+        furniturePrototypes[Config.DOOR].isEnterable = FurnitureActions.DoorIsEnterable;
 
+        furniturePrototypes.Add(STOCKPILE, //Name of object
+        new Furniture(STOCKPILE,
+        1, //1 = standard movment cost
+        1, //Width
+        1, //Height
+        true, //the stockpiles link to their neighbours
+        false //The stockpiles do not enclose rooms
+        ));
+
+        furniturePrototypes[STOCKPILE].RegisterUpdateAction(FurnitureActions.StockpileUpdateAction);
+        furniturePrototypes[STOCKPILE].tint = new Color32(186,31,31,100);
+        furnitureJobPrototypes.Add(STOCKPILE, new Job(null, STOCKPILE, FurnitureActions.JobCompleteFurnitureBuilding, -1f, null));
+
+
+        furniturePrototypes.Add(OXYGEN_GENERATOR, //Name of object
+        new Furniture(OXYGEN_GENERATOR,
+        10, //Pathfinding cost
+        2, //Width
+        2, //Height
+        false, //Links to neighbours and becomes part of a larger object
+        false //Doors enclose rooms
+        ));
+
+        furniturePrototypes[OXYGEN_GENERATOR].RegisterUpdateAction(FurnitureActions.OxygenGeneratorUpdateAction);
     }
 
     public void RandomizeTiles()
@@ -165,7 +226,7 @@ public class World : IXmlSerializable
                 {
                     if (x != (l + 9) && y != (b + 4))
                     {
-                        PlaceFurniture(WALL, tiles[x, y]);
+                        PlaceFurniture(Config.WALL, tiles[x, y]);
                     }
                 }
             }
@@ -194,18 +255,32 @@ public class World : IXmlSerializable
         }
 
         Furniture furniture = Furniture.PlaceInstance(furniturePrototypes[objectType], tile);
+
         if (furniture == null)
         {
             //Failed to place object -- most likely there was something already there
             return null;
         }
 
+        furniture.RegisterOnRemovedCallback(OnFurnitureRemoved);
         furnitures.Add(furniture);
+        
+        //Do we need to recalculate our rooms?
+        if(furniture.roomEnclosure)
+        {
+            Room.DoRoomFloodFill(furniture);
+        }
 
         if(callBackFurnitureCreated != null)
         {
             callBackFurnitureCreated(furniture);
-            InvalidateTileGraph();
+            if(furniture.movementCost != 1)
+            {
+                //Since tiles return movement cost as their base cost multiplied by furniture
+                //a movement cost of 1 does not effect pathfinding
+                InvalidateTileGraph(); //Reset the pathfinding system
+            }
+            
         }
 
         return furniture;
@@ -229,6 +304,16 @@ public class World : IXmlSerializable
     public void UnregisterCharacterCreated(Action<Character> callbackFunc)
     {
         callBackCharacterCreated -= callbackFunc;
+    }
+
+    public void RegisterInventoryCreated(Action<Inventory> callbackFunc)
+    {
+        callBackInventoryCreated += callbackFunc;
+    }
+
+    public void UnregisterInventoryCreated(Action<Inventory> callbackFunc)
+    {
+        callBackInventoryCreated -= callbackFunc;
     }
 
     public void RegisterTileChanged(Action<Tile> callbackFunc)
@@ -278,11 +363,6 @@ public class World : IXmlSerializable
     ///                                                Saving and Loading
     /// 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    
-    public World()
-    {
-
-    }
 
     public XmlSchema GetSchema()
     {
@@ -292,34 +372,37 @@ public class World : IXmlSerializable
     public void WriteXml(XmlWriter writer)
     {
         //save info here
-        writer.WriteAttributeString(WIDTH, Width.ToString());
-        writer.WriteAttributeString(HEIGHT, Height.ToString());
+        writer.WriteAttributeString(Config.WIDTH, Width.ToString());
+        writer.WriteAttributeString(Config.HEIGHT, Height.ToString());
 
-        writer.WriteStartElement(TILES);
+        writer.WriteStartElement(Config.TILES);
         for (int x = 0; x < Width; x++)
         {
             for (int y = 0; y < Height; y++)
             {
-                writer.WriteStartElement(TILE);
-                tiles[x, y].WriteXml(writer);
-                writer.WriteEndElement();
+                if(tiles[x,y].Type != TileType.Empty)
+                {
+                    writer.WriteStartElement(Config.TILE);
+                    tiles[x, y].WriteXml(writer);
+                    writer.WriteEndElement();
+                }
             }
         }
         writer.WriteEndElement();
 
-        writer.WriteStartElement(FURNITURES);
+        writer.WriteStartElement(Config.FURNITURES);
         foreach (Furniture furniture in furnitures)
         {
-            writer.WriteStartElement(FURNITURE);
+            writer.WriteStartElement(Config.FURNITURE);
             furniture.WriteXml(writer);
             writer.WriteEndElement();
         }
         writer.WriteEndElement();
 
-        writer.WriteStartElement(CHARACTERS);
+        writer.WriteStartElement(Config.CHARACTERS);
         foreach (Character character in characters)
         {
-            writer.WriteStartElement(CHARACTER);
+            writer.WriteStartElement(Config.CHARACTER);
             character.WriteXml(writer);
             writer.WriteEndElement();
         }
@@ -330,33 +413,58 @@ public class World : IXmlSerializable
     {
         //Load Info Here
         //Debug.Log("ReadXML");
-        width = int.Parse(reader.GetAttribute(WIDTH));
-        height = int.Parse(reader.GetAttribute(HEIGHT));
+        width = int.Parse(reader.GetAttribute(Config.WIDTH));
+        height = int.Parse(reader.GetAttribute(Config.HEIGHT));
         SetUpWorld(width, height);
 
         while (reader.Read())
         {
             switch (reader.Name)
             {
-                case TILES:
+                case Config.TILES:
                     ReadXmlTiles(reader);
                     break;
-                case FURNITURES:
+                case Config.FURNITURES:
                     ReadXmlFurnitures(reader);
                     break;
-                case CHARACTERS:
+                case Config.CHARACTERS:
                     ReadXmlCharacters(reader);
                     break;
 
             }
         }
+        //todo fixme: Debugging only remove me later
+        //Create an inventory item
 
+        Inventory inventory = new Inventory(Config.STEEL_PLATE, 50, 50);
+        SpawnInventory(0, 0, inventory);
+        inventory = new Inventory(Config.STEEL_PLATE, 50, 4);
+        SpawnInventory(2, 0, inventory);
+        inventory = new Inventory(Config.STEEL_PLATE, 50, 3);
+        SpawnInventory(1, 2, inventory);
+
+    }
+
+    /// <summary>
+    /// Location where the inventory will be spawned
+    /// </summary>
+    /// <param name="spawnLocationX"></param>
+    /// <param name="spawnLocationY"></param>
+    /// <param name="inventory"> the inventory to spawn</param>
+    private void SpawnInventory(int spawnLocationX, int spawnLocationY, Inventory inventory)
+    {
+        Tile tile = GetTileAt(Width / 2 + spawnLocationX, Height / 2 + spawnLocationY);
+        inventoryManager.PlaceInventory(tile, inventory);
+        if (callBackInventoryCreated != null)
+        {
+            callBackInventoryCreated(tile.inventoryTile);
+        }
     }
 
     private void ReadXmlTiles(XmlReader reader)
     {
         //We are in the tiles element, so read elements until we run out of "tile" nodes.
-        if(reader.ReadToDescendant(TILE))
+        if(reader.ReadToDescendant(Config.TILE))
         {
             //we have at least one tile so do something with it
             do
@@ -364,7 +472,7 @@ public class World : IXmlSerializable
                 int x = int.Parse(reader.GetAttribute("X"));
                 int y = int.Parse(reader.GetAttribute("Y"));
                 tiles[x, y].ReadXml(reader);
-            } while (reader.ReadToNextSibling(TILE));
+            } while (reader.ReadToNextSibling(Config.TILE));
         }
     }
 
@@ -372,7 +480,7 @@ public class World : IXmlSerializable
     {
         //We are in the furnitures element, so read elements until we run out of "Furniture" nodes.
 
-        if (reader.ReadToDescendant(FURNITURE))
+        if (reader.ReadToDescendant(Config.FURNITURE))
         {
             //we have at least one tile so do something with it
             do
@@ -380,15 +488,15 @@ public class World : IXmlSerializable
                 int x = int.Parse(reader.GetAttribute("X"));
                 int y = int.Parse(reader.GetAttribute("Y"));
                 //tiles[x, y].ReadXml(reader);
-                Furniture furniture = PlaceFurniture(reader.GetAttribute(OBJECT_TYPE), tiles[x, y]);
-            } while (reader.ReadToNextSibling(FURNITURE));
+                Furniture furniture = PlaceFurniture(reader.GetAttribute(Config.OBJECT_TYPE), tiles[x, y]);
+            } while (reader.ReadToNextSibling(Config.FURNITURE));
         }
     }
 
     private void ReadXmlCharacters(XmlReader reader)
     {
         //We are in the characters element, so read elements until we run out of "Character" objects.
-        if (reader.ReadToDescendant(CHARACTER))
+        if (reader.ReadToDescendant(Config.CHARACTER))
         {
             //we have at least one tile so do something with it
             do
@@ -397,7 +505,20 @@ public class World : IXmlSerializable
                 int y = int.Parse(reader.GetAttribute("Y"));
                 //tiles[x, y].ReadXml(reader);
                 Character character = CreateCharacter(tiles[x, y]);
-            } while (reader.ReadToNextSibling(CHARACTER));
+            } while (reader.ReadToNextSibling(Config.CHARACTER));
         }
+    }
+
+    public void OnInventoryCreated(Inventory inventory)
+    {
+        if(callBackInventoryCreated != null)
+        {
+            callBackInventoryCreated(inventory);
+        }
+    }
+
+    public void OnFurnitureRemoved(Furniture furniture)
+    {
+        furnitures.Remove(furniture);
     }
 }

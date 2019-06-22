@@ -96,6 +96,10 @@ public class PathAStar
                 {
                     openSet.Enqueue(neighbour, fscore[neighbour]);
                 }
+                else
+                {
+                    openSet.UpdatePriority(neighbour, fscore[neighbour]);
+                }
             }
         }
 
